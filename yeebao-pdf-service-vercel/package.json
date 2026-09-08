@@ -1,0 +1,13 @@
+{
+  "name": "yeebao-pdf-service-vercel",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "22.x"
+  },
+  "dependencies": {
+    "@sparticuz/chromium-min": "149.0.0",
+    "puppeteer-core": "25.1.0"
+  }
+}
