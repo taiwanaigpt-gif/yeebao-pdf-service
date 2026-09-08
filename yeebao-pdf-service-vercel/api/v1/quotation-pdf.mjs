@@ -263,3 +263,4 @@ export default async function handler(req, res) {
         : (error?.message || 'PDF request failed.')
     });
   }
+}
