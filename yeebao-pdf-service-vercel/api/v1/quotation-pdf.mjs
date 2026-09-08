@@ -129,8 +129,6 @@ async function launchBrowser() {
 }
 
 async function renderQuotationPdf({ accessToken, quotationId, versionNo }) {
-  await validateQuotationAccess(accessToken, quotationId, versionNo);
-
   const detailUrl = new URL(DETAIL_PATH, SITE_URL + '/');
   detailUrl.searchParams.set('quotation_id', quotationId);
   if (versionNo !== null) detailUrl.searchParams.set('version_no', String(versionNo));
@@ -145,7 +143,34 @@ async function renderQuotationPdf({ accessToken, quotationId, versionNo }) {
       try { localStorage.setItem('yeebao_access_token', token); } catch {}
     }, accessToken);
 
+    // 直接由 Chromium 開啟與使用者相同的報價單明細頁。
+    // Token 已在 evaluateOnNewDocument() 寫入同網域 localStorage，
+    // 因此頁面本身會使用既有的 Yeebao REST API 權限流程載入報價單。
+    // 這可避開部分主機/WAF 對「雲端伺服器直接呼叫 WordPress REST API」的攔截。
     await page.goto(detailUrl.toString(), { waitUntil: 'domcontentloaded', timeout: TIMEOUT_MS });
+
+    await page.waitForFunction(() => {
+      const output = document.getElementById('yb-detail-output');
+      const paper = output?.querySelector('.yb-quote-paper');
+      const text = String(output?.textContent || '');
+      return Boolean(paper) || /自動讀取失敗|尚未登入|請重新登入/.test(text);
+    }, { timeout: TIMEOUT_MS });
+
+    const pageState = await page.evaluate(() => {
+      const output = document.getElementById('yb-detail-output');
+      return {
+        hasPaper: Boolean(output?.querySelector('.yb-quote-paper')),
+        text: String(output?.textContent || '').trim().slice(0, 500),
+        href: location.href
+      };
+    });
+
+    if (!pageState.hasPaper) {
+      const error = new Error(pageState.text || 'Quotation could not be loaded in Chromium.');
+      error.status = /登入|權限|forbidden|unauthor/i.test(pageState.text) ? 403 : 502;
+      throw error;
+    }
+
     await page.waitForSelector('#yb-quote-print-root .yb-quote-paper', { timeout: TIMEOUT_MS });
 
     await page.evaluate(async () => {
@@ -238,4 +263,3 @@ export default async function handler(req, res) {
         : (error?.message || 'PDF request failed.')
     });
   }
-}
