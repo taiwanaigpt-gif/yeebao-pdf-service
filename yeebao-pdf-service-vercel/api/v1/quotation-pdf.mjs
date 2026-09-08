@@ -105,7 +105,7 @@ async function renderHtmlPdf(html) {
     page.setDefaultTimeout(TIMEOUT_MS);
     page.setDefaultNavigationTimeout(TIMEOUT_MS);
 
-    // 1.0.2：直接轉換使用者瀏覽器已渲染完成的列印 HTML。
+    // 1.0.3：直接轉換使用者瀏覽器已渲染完成的列印 HTML，並等待繁中字型完整載入。
     // 不再重新登入 WordPress，也不再等待 quotation-detail 的 REST API。
     await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: Math.min(TIMEOUT_MS, 15000) });
 
@@ -119,11 +119,16 @@ async function renderHtmlPdf(html) {
       document.body.classList.add('yb-quote-printing');
       root.setAttribute('aria-hidden', 'false');
 
-      if (document.fonts?.ready) {
+      if (document.fonts) {
         try {
+          // 明確要求 Chromium 載入繁中 glyph，避免只有 Open Sans 時中文字變空白。
           await Promise.race([
-            document.fonts.ready,
-            new Promise((resolve) => setTimeout(resolve, 5000))
+            Promise.all([
+              document.fonts.load('400 16px "Noto Sans TC"', '繁體中文報價單測試'),
+              document.fonts.load('700 16px "Noto Sans TC"', '客戶報價單總計'),
+              document.fonts.ready
+            ]),
+            new Promise((resolve) => setTimeout(resolve, 10000))
           ]);
         } catch {}
       }
@@ -148,7 +153,7 @@ async function renderHtmlPdf(html) {
       })));
 
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      return { ok: true };
+      return { ok: true, cjkFontReady: !!document.fonts?.check('16px \"Noto Sans TC\"', '繁體中文') };
     });
 
     if (!state?.ok) {
@@ -182,7 +187,7 @@ export default async function handler(req, res) {
   if (!originAllowed(req)) return res.status(403).json({ ok: false, message: 'Origin is not allowed.' });
 
   // 仍要求易報登入 Token，避免瀏覽器匿名直接濫用 PDF endpoint。
-  // 1.0.2 不再用此 Token 重新呼叫 Bluehost / WordPress REST API。
+  // 1.0.3 不再用此 Token 重新呼叫 Bluehost / WordPress REST API。
   const accessToken = getBearer(req);
   if (!accessToken) return res.status(401).json({ ok: false, message: 'Missing Authorization: Bearer token.' });
 
@@ -213,7 +218,7 @@ export default async function handler(req, res) {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     return res.status(200).send(Buffer.from(pdf));
   } catch (error) {
-    console.error('[Yeebao PDF 1.0.2]', quotationId, error);
+    console.error('[Yeebao PDF 1.0.3]', quotationId, error);
     const status = Number(error?.status) || 500;
     return res.status(status).json({
       ok: false,
